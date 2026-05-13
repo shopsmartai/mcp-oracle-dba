@@ -7,6 +7,13 @@ any MCP client query your Oracle database safely.
 > Built by an Oracle Apps DBA. Designed so an LLM can explore production
 > data without ever being able to mutate it.
 
+![demo](docs/demo.png)
+
+In the screenshot above, Claude (via this MCP server) successfully runs
+discovery + a real `SELECT` over my Oracle 23ai database — and is then
+**refused** when it tries to `DROP TABLE`. Every call is recorded in the
+audit log.
+
 ---
 
 ## Why this exists
@@ -93,8 +100,15 @@ cp .env.example .env
 
 `ORA_DSN` examples:
 - `localhost:1521/FREEPDB1` — local Oracle 23ai Free
-- `oracle23ai.orb.local:1521/FREEPDB1` — OrbStack on macOS
-  (avoids port-forwarding NAT issues that mangle TNS handshakes)
+- `oracle23ai.orb.local:1521/FREEPDB1` — OrbStack on macOS, when running
+  the server from a normal terminal (avoids port-forwarding NAT issues
+  that mangle TNS handshakes)
+- `192.168.215.2:1521/FREEPDB1` — OrbStack container direct IP, **required
+  when this MCP server is launched by Claude Desktop or any sandboxed
+  macOS app**. Sandboxed child processes do not have access to OrbStack's
+  `.orb.local` DNS resolver — the connection fails with `DPY-6005 / No
+  route to host`. Use `docker inspect oracle23ai --format '{{range
+  .NetworkSettings.Networks}}{{.IPAddress}}{{end}}'` to get the IP.
 - `prod-db.example.com:1521/PRODPDB` — production (use a
   read-only user!)
 
