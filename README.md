@@ -30,6 +30,8 @@ query, the server refuses **before** the SQL ever reaches Oracle.
 
 ## Tools exposed
 
+**Core (5 tools, always enabled):**
+
 | Tool | What it does |
 |------|--------------|
 | `list_schemas`   | Returns the allowlist of schemas the server is configured to query. |
@@ -37,6 +39,21 @@ query, the server refuses **before** the SQL ever reaches Oracle.
 | `run_select`     | Validates + runs a `SELECT` / `WITH` query. Row-capped, PII-redacted. |
 | `explain_plan`   | Oracle `EXPLAIN PLAN` output for a query (`DBMS_XPLAN.DISPLAY`). |
 | `top_sql`        | Top SQL by elapsed time from `v$sql` over the last N minutes. |
+
+**AWR / ASH (5 tools, gated behind `MCP_ENABLE_AWR=true`):**
+
+| Tool | What it does |
+|------|--------------|
+| `list_awr_snapshots` | Available AWR snapshots in the last N hours (one row per `snap_id`, multi-tenant dedup'd). |
+| `awr_summary`        | Compact AWR analysis: top SQL + wait events + DB-time breakdown in one JSON. Reach for this first when answering "why was the DB slow between X and Y?". |
+| `awr_top_sql`        | Top SQL by elapsed time between two snapshots. Per-`sql_id`: elapsed seconds, executions, sec/exec, buffer gets, disk reads, CPU seconds, 200-char SQL preview. |
+| `awr_wait_events`    | Top ASH wait events between snapshots. From `DBA_HIST_ACTIVE_SESS_HISTORY`. |
+| `awr_time_model`     | DB-time breakdown across cumulative `DBA_HIST_SYS_TIME_MODEL` counters. Useful for "where did DB time go?". |
+
+> **AWR/ASH tools require Oracle Diagnostic Pack licensing** on Standard
+> Edition and Enterprise Edition production databases. Oracle Database
+> Free Edition (23ai) includes the diagnostic features for development
+> use. Set `MCP_ENABLE_AWR=true` in `.env` to expose these tools.
 
 ## Security model (defense in depth)
 
@@ -174,6 +191,7 @@ All settings load from `.env` (see `.env.example`):
 | `MCP_SCHEMA_ALLOWLIST`           | `APPS,APPLSYS,SYS,RAGAPP` | Comma-separated schemas allowed for `describe_table` |
 | `MCP_COLUMN_DENYLIST`            | `SSN,SALARY,TAX_ID,PASSWORD,…` | Column-name substrings to redact |
 | `MCP_AUDIT_LOG`                  | `./audit.log` | JSON-line audit log path |
+| `MCP_ENABLE_AWR`                 | `false`    | Expose the 5 AWR/ASH tools (requires Diagnostic Pack on production) |
 
 ## Recommended database setup
 
@@ -193,11 +211,22 @@ it covers all data-dictionary and dynamic-performance views in
 one line, and avoids the "SYSTEM can't forward SYS-owned grants"
 issue you hit otherwise.
 
+## Oracle version compatibility
+
+| Version | Status | Notes |
+|---|---|---|
+| **Oracle 23ai** (CDB+PDB or single) | Tested | Primary development target |
+| **Oracle 19c** | Works without code changes | Same tools, same syntax. The MCP server uses no 23ai-specific features. Most production EBS R12.2 environments are on 19c. |
+| **Oracle 12.1+** | Works | `python-oracledb` thin mode supports anything from 12.1 onward |
+| **RAC** | Works | `oracledb` handles SCAN listeners; tools query instance 1 by default |
+
+For EBS R12.2 + 19c specifically, customize `MCP_SCHEMA_ALLOWLIST`:
+```
+MCP_SCHEMA_ALLOWLIST=APPS,APPLSYS,FND,AR,AP,GL,SYS
+```
+
 ## What's NOT included (yet)
 
-- **AWR / ASH tools** (top wait events, time model, snapshot comparison) —
-  see roadmap. Requires Oracle Diagnostic Pack license, so it's
-  gated behind a feature flag.
 - **Connection pooling** — current implementation opens one
   connection per tool call. Fine for sparse MCP workloads; swap in
   `oracledb.create_pool()` if you need higher throughput.
@@ -205,6 +234,9 @@ issue you hit otherwise.
   `UPDATE_*` tools, and there never will be in this server. Write
   paths belong in dedicated, application-specific MCP servers
   with their own threat model.
+- **Thick-mode support** for environments requiring Oracle Wallet —
+  thin mode handles most cases including SSL; thick mode would need
+  a separate code path.
 
 ## Roadmap
 
@@ -212,10 +244,14 @@ issue you hit otherwise.
 - [x] SQL guardrails + 45 security tests
 - [x] PII column redaction
 - [x] JSON-line audit log
-- [ ] AWR summary tool (top SQL + waits + time model in one JSON blob)
-- [ ] ASH wait-event sampler tool
-- [ ] Hybrid TNS + thick-mode support (for environments requiring
-      Oracle Wallet)
+- [x] AWR summary tool (top SQL + waits + time model in one JSON blob)
+- [x] ASH wait-event sampler tool
+- [x] AWR top SQL + time model tools
+- [x] AWR feature flag (`MCP_ENABLE_AWR`) for Diagnostic Pack gating
+- [ ] Connection pooling (`oracledb.create_pool()`) for higher throughput
+- [ ] Hybrid TNS + thick-mode support (for environments requiring Oracle Wallet)
+- [ ] Structured failure responses (machine-readable JSON refusals with
+      policy ID + retry guidance, per community feedback)
 - [ ] CI integration tests against a Docker `gvenzl/oracle-free`
       service container
 
